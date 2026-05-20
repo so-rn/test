@@ -1,95 +1,285 @@
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
-import plotly.express as px
 import plotly.graph_objects as go
-from copy import deepcopy
+import plotly.express as px
+from plotly.subplots import make_subplots
+import numpy as np
+import plotly.io as pio
+from streamlit_option_menu import option_menu
+
+st.set_page_config(
+    page_title="Macroeconomic Dashboard",
+    page_icon="🌍",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
+
+pio.templates.default = "plotly_dark"
+
+# -------------------------
+# LOAD CSS
+# -------------------------
+with open("style.css") as f:
+    st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+
+
+# -------------------------
+# DATA FUNCTIONS
+# -------------------------
+@st.cache_data
+def load_global_economy():
+    try:
+        df = pd.read_csv("global_economy.csv")
+        df["Date"] = pd.to_datetime(df["Date"])
+        df["Year"] = df["Date"].dt.year
+        return df.sort_values("Date")
+    except:
+        return pd.DataFrame()
+
 
 @st.cache_data
-def load_data(path):
-    df = pd.read_csv(path)
-    return df
+def load_world_countries():
+    df_full = px.data.gapminder()
+    df = df_full.query("year == 2007").copy()
 
-mpg_df_raw = load_data("internet.csv")
-mpg_df = deepcopy(mpg_df_raw)
+    df["Pre_Conflict_GDP_Billion"] = (df["gdpPercap"] * df["pop"]) / 1e9
 
-st.title("Introduction to Streamlit")
-st.header("Internet Data Exploration")
+    rng = np.random.default_rng(42)
 
-if st.checkbox("Show Dataframe"):
-    st.subheader("This is my dataset:")
-    st.dataframe(mpg_df)
-
-left_column, middle_column, right_column = st.columns([3, 1, 1])
-
-numeric_cols = mpg_df.select_dtypes(include=['number']).columns
-object_cols = mpg_df.select_dtypes(include=['object']).columns
-
-if len(numeric_cols) >= 2:
-    col_x = numeric_cols[0]
-    col_y = numeric_cols[1]
-else:
-    col_x = mpg_df.columns[0]
-    col_y = mpg_df.columns[0]
-
-if len(object_cols) > 0:
-    group_col = object_cols[0]
-else:
-    group_col = mpg_df.columns[0]
-
-if "year" in mpg_df.columns:
-    years = ["All"] + sorted(pd.unique(mpg_df["year"]))
-    year = left_column.selectbox("Choose a year", years)
-    if year == "All":
-        reduced_df = mpg_df
-    else:
-        reduced_df = mpg_df[mpg_df["year"] == year]
-else:
-    reduced_df = mpg_df
-
-show_means = middle_column.radio("Show Class Means", ["Yes", "No"])
-
-plot_types = ["Matplotlib", "Plotly"]
-plot_type = right_column.radio("Choose Plot type", plot_types)
-
-means = reduced_df.groupby(group_col).mean(numeric_only=True)
-
-if plot_type == "Matplotlib":
-    m_fig, ax = plt.subplots(figsize=(10, 8))
-    ax.scatter(reduced_df[col_x], reduced_df[col_y], alpha=0.7)
-    ax.set_title("Data Exploration Plot")
-    ax.set_xlabel(col_x)
-    ax.set_ylabel(col_y)
-
-    if show_means == "Yes" and col_x in means.columns and col_y in means.columns:
-        ax.scatter(means[col_x], means[col_y], alpha=0.7, color="red", label="Class Means")
-    st.pyplot(m_fig)
-
-else:
-    p_fig = px.scatter(
-        reduced_df, 
-        x=col_x, 
-        y=col_y, 
-        opacity=0.5,
-        width=750, 
-        height=600, 
-        labels={col_x: col_x, col_y: col_y},
-        title="Data Exploration Plot"                   
+    df["Post_Conflict_GDP_Billion"] = (
+        df["Pre_Conflict_GDP_Billion"] * rng.uniform(0.90, 1.15, len(df))
     )
-    p_fig.update_layout(title_font_size=22)
 
-    if show_means == "Yes" and col_x in means.columns and col_y in means.columns:
-        p_fig.add_trace(go.Scatter(x=means[col_x], y=means[col_y], mode="markers", marker={"color": "red"}))
-        p_fig.update_layout(showlegend=False)
-    st.plotly_chart(p_fig)
+    df["Exports_Billion"] = (
+        df["Pre_Conflict_GDP_Billion"] * rng.uniform(0.10, 0.40, len(df))
+    )
 
-url = "https://archive.ics.uci.edu/ml/datasets/auto+mpg"
-st.write("Data Source", url)
+    df["Imports_Billion"] = (
+        df["Pre_Conflict_GDP_Billion"] * rng.uniform(0.10, 0.40, len(df))
+    )
 
-st.subheader("Streamlit Map")
-ds_geo = px.data.carshare()
-st.dataframe(ds_geo.head())
+    df = df.rename(columns={
+        "country": "Country",
+        "continent": "Continent"
+    })
 
-ds_geo["lat"] = ds_geo["centroid_lat"]
-ds_geo["lon"] = ds_geo["centroid_lon"]
-st.map(ds_geo)
+    return df.sort_values("Country"), df_full
+
+
+# -------------------------
+# LOAD DATA
+# -------------------------
+df_economy_raw = load_global_economy()
+df_world, df_world_full = load_world_countries()
+
+
+# -------------------------
+# CUSTOM METRIC
+# -------------------------
+def custom_metric(title, value_raw, delta):
+    try:
+        val = float(value_raw)
+        formatted_value = f"${val:,.2f}"
+    except:
+        formatted_value = str(value_raw)
+
+    st.markdown(f"""
+    <div class="metric-card">
+        <div class="metric-title">{title}</div>
+        <div class="metric-value">{formatted_value}</div>
+        <div class="metric-delta">{delta}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+
+# -------------------------
+# SIDEBAR MENU
+# -------------------------
+with st.sidebar:
+
+    st.markdown("## 🌍 Macro Dashboard")
+
+    selected = option_menu(
+        menu_title=None,
+        options=[
+            "Market Impact",
+            "Economic Map",
+            "Countries Comparison",
+            "Country Analysis"
+        ],
+        icons=[
+            "graph-up-arrow",
+            "globe-americas",
+            "bar-chart-line",
+            "search"
+        ],
+        menu_icon="cast",
+        default_index=0,
+        styles={
+            "container": {
+                "padding": "0!important",
+                "background-color": "#161B22"
+            },
+            "icon": {"color": "#58A6FF", "font-size": "18px"},
+            "nav-link": {
+                "font-size": "15px",
+                "text-align": "left",
+                "margin": "5px",
+                "border-radius": "12px"
+            },
+            "nav-link-selected": {
+                "background-color": "#238636"
+            },
+        },
+    )
+
+
+# -------------------------
+# MARKET IMPACT
+# -------------------------
+if selected == "Market Impact":
+
+    st.title("Global Economy & Geopolitical Conflicts")
+
+    if df_economy_raw.empty:
+        st.warning("Add global_economy.csv file")
+        st.stop()
+
+    latest = df_economy_raw.iloc[-1]
+
+    c1, c2, c3, c4 = st.columns(4)
+
+    def safe(v):
+        try:
+            return float(v)
+        except:
+            return 0.0
+
+    with c1:
+        custom_metric("Oil Price", round(safe(latest['Oil_Price']), 2), "Live")
+
+    with c2:
+        custom_metric("EUR/USD", round(safe(latest['EUR_USD']), 4), "FX")
+
+    with c3:
+        custom_metric("USD/CHF", round(safe(latest['USD_CHF']), 4), "Forex")
+
+    with c4:
+        custom_metric("STOXX 50", round(safe(latest['Europe_Stock']), 2), "Europe")
+
+
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+
+    fig.add_trace(
+        go.Scatter(
+            x=df_economy_raw["Date"],
+            y=df_economy_raw["Oil_Price"],
+            name="Oil Price",
+            line=dict(color="#F85149", width=3)
+        ),
+        secondary_y=False
+    )
+
+    fig.add_trace(
+        go.Scatter(
+            x=df_economy_raw["Date"],
+            y=df_economy_raw["Europe_Stock"],
+            name="STOXX 50",
+            line=dict(color="#58A6FF", width=2, dash="dot")
+        ),
+        secondary_y=True
+    )
+
+    fig.update_layout(
+        height=650,
+        paper_bgcolor="#0E1117",
+        plot_bgcolor="#161B22",
+        font=dict(color="white")
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+
+# -------------------------
+# ECONOMIC MAP
+# -------------------------
+elif selected == "Economic Map":
+
+    st.title("Interactive World Economic Map")
+
+    metric = st.selectbox(
+        "Select Metric",
+        [
+            "Pre_Conflict_GDP_Billion",
+            "Post_Conflict_GDP_Billion",
+            "Exports_Billion",
+            "Imports_Billion"
+        ]
+    )
+
+    fig_map = px.choropleth(
+        df_world,
+        locations="iso_alpha",
+        color=metric,
+        hover_name="Country",
+        color_continuous_scale="Viridis"
+    )
+
+    fig_map.update_layout(height=700, paper_bgcolor="#0E1117")
+
+    st.plotly_chart(fig_map, use_container_width=True)
+
+
+# -------------------------
+# COUNTRIES COMPARISON
+# -------------------------
+elif selected == "Countries Comparison":
+
+    st.title("World Countries Comparison")
+
+    fig = px.scatter(
+        df_world,
+        x="Pre_Conflict_GDP_Billion",
+        y="Post_Conflict_GDP_Billion",
+        color="Continent",
+        size="pop",
+        hover_name="Country"
+    )
+
+    fig.update_layout(
+        height=700,
+        paper_bgcolor="#0E1117",
+        plot_bgcolor="#161B22"
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+
+# -------------------------
+# COUNTRY ANALYSIS
+# -------------------------
+elif selected == "Country Analysis":
+
+    st.title("Country Deep Analysis")
+
+    country = st.selectbox(
+        "Select Country",
+        df_world["Country"]
+    )
+
+    row = df_world[df_world["Country"] == country].iloc[0]
+
+    c1, c2, c3 = st.columns(3)
+
+    with c1:
+        custom_metric("Pre GDP", row['Pre_Conflict_GDP_Billion'], "")
+
+    with c2:
+        custom_metric("Post GDP", row['Post_Conflict_GDP_Billion'], "")
+
+    with c3:
+        custom_metric(
+            "Trade Balance",
+            row['Exports_Billion'] - row['Imports_Billion'],
+            ""
+        )
